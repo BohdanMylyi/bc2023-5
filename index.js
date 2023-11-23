@@ -1,97 +1,156 @@
 const express = require("express");
 const multer = require("multer");
+const fs = require("fs/promises"); 
 const app = express();
-const fs = require("fs");
+const PORT = 8000;
+const path = require('path');
 
-app.use(multer().none());
 
-const notesFile = "notes.json";
+const upload = multer();
 
-function readNotesFromFile() {
-    try {
-        const data = fs.readFileSync(notesFile);
-        return JSON.parse(data);
-    } catch (error) {
-        return [];
+
+const notesFilePath = "notes.json";
+
+
+async function checkNotes() {
+  try {
+   
+    await fs.access(notesFilePath);
+
+  } catch (error) {
+    
+    await fs.writeFile(notesFilePath, "[]");
+  }
+
+
+app.use(express.json());
+}
+
+
+app.post("/upload", upload.none(), async (req, res) => {
+  try {
+    await checkNotes();
+    const data = await fs.readFile(notesFilePath, "utf-8");
+    const notes = JSON.parse(data);
+    const { note_name: noteName, note: noteText } = req.body;
+    console.log(noteName)
+    if (notes.some((note) => note.title === noteName)) {
+      return res.status(400).end();
     }
-}
-
-function writeNotesToFile(data) {
-    fs.writeFileSync(notesFile, JSON.stringify(data, null, 2));
-}
-
-const notes = readNotesFromFile();
-
-app.get('/', (req, res) => {
-    res.send(`<h1>Запити:</h1>
-            1. /notes<b1>
-            2. /UploadForm.html<b1>
-            3. /notes/<note_name><b1>`);
-})
-
-app.get('/notes', (req, res) => {
-res.json({ notes });
-})
+    notes.push({ title: noteName, text: noteText });
+    await fs.writeFile(notesFilePath, JSON.stringify(notes));
+    res.status(201).end();
+  } catch (error) {
+    console.error(error);
+    res.status(500).send("Internal Server Error");
+  }
+});
 
 app.get('/UploadForm.html', (req, res) => {
-    const path = (__dirname + '/static/UploadForm.html');
-    res.sendFile(path);
-})
+    res.sendFile(path.join(__dirname, 'static', 'UploadForm.html'));
+ });
 
-app.post('/upload', (req, res) => {
-    const noteName = req.body.note_name;
-    const note = req.body.note;
+
+
+app.get("/notes", async (req, res) => {
+  try {
+    await checkNotes();
+    const data = await fs.readFile(notesFilePath, "utf-8");
+    const notes = JSON.parse(data);
+    res.json(notes);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+
+app.get("/notes/:noteName", async (req, res) => {
+  try {
+    await checkNotes();
+    const data = await fs.readFile(notesFilePath, "utf-8");
+    const notes = JSON.parse(data);
+    const noteName = req.params.noteName;
+    const note = notes.find((note) => note.title === noteName);
+    if (note) {
+      res.send(note.text);
+    } else {
+      res.status(404).send("Note not found");
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+
+
+
+app.put("/notes/:noteName", express.text(), async (req, res) => {
+
+  try {
+    await checkNotes();
+
+    const noteName = req.params.noteName;
+    const updatedNoteText = req.body;
+    const data = await fs.readFile(notesFilePath, "utf-8");
+    const notes = JSON.parse(data);
+    const index = notes.findIndex((note) => note.title === noteName);
+    if (index !== -1) {
+      notes[index].text = updatedNoteText;
+      await fs.writeFile(notesFilePath, JSON.stringify(notes));
+      res.status(200).send("Updated");
+    } else {
+      res.status(404).send("Note not found");
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+
+
+app.delete("/notes/:noteName", async (req, res) => {
+
+  try {
+
+    await checkNotes();
+
+    const noteName = req.params.noteName;
+
+    const data = await fs.readFile(notesFilePath, "utf-8");
+
+    const notes = JSON.parse(data);
+
     
-    const existing = notes.find(note => note.note_name === noteName);
+    const index = notes.findIndex((note) => note.title === noteName);
 
-    if(existing){
-        res.status(400).send("Нотатка з таким ім'ям вже існує");
-    }else{
-        notes.push({ note_name: noteName, note: note });
-        writeNotesToFile(notes)
-        res.status(201).send("Нотатка успішно додана");
-    }
-})
+    if (index !== -1) {
+  
+      notes.splice(index, 1);
 
-app.get('/notes/:note_name', (req, res) => {
-    const note_name = req.params.note_name;
-    const findNotes = notes.find(note => note.note_name === note_name);
+      await fs.writeFile(notesFilePath, JSON.stringify(notes));
 
-    if(findNotes)
-    {
-        res.send({note_name: note_name, note: findNotes.note});
-    } else{
-        res.status(404).json("Нотатку не знайдено");
-    }
-})
+      res.status(200).send("Deleted");
 
-app.put('/notes/:note_name', (req, res) => {
-    const noteName = req.params.note_name;
-    const note = req.body.note
-    const findNoteIndex = notes.findIndex(note => note.note_name === noteName);
-
-    if (findNoteIndex !== -1) {
-        notes[findNoteIndex].note = note; 
-        writeNotesToFile(notes); 
-        res.json({ note_name: noteName, note: notes[findNoteIndex].note });
     } else {
-        res.status(404).send("Нотатку не знайдено");
-    }
-});
 
-app.delete('/notes/:note_name', (req, res) => {
-    const noteName = req.params.note_name;
-    const findNoteIndex = notes.findIndex(note => note.note_name === noteName);
+      res.status(404).send("Note not found");
 
-    if (findNoteIndex !== -1) {
-        notes.splice(findNoteIndex, 1);
-        writeNotesToFile(notes);
-        res.send(`Нотатка ${noteName} була видалена`);
-    } else {
-        res.status(404).send("Нотатку не знайдено");
     }
+  } catch (error) {
+
+    console.error(error);
+
+    res.status(500).send("Internal Server Error");
+
+  }
 });
 
 
+app.listen(PORT, () => {
 
-app.listen(8000);
+  console.log(`Server is running on port ${PORT}`);
+
+});
